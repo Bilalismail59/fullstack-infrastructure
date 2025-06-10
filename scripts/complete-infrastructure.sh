@@ -139,7 +139,7 @@ terraform plan \
     -var="project_id=$PROJECT_ID" \
     -var="region=$REGION" \
     -var="zone=$ZONE" \
-    -var="db_password=SecurePassword123!" \
+    -var="db_password=${DB_PASSWORD:-SecurePassword123!}" \
     -out=tfplan-$ENVIRONMENT
 
 echo " Application Terraform..."

@@ -24,6 +24,7 @@ env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GCP_REGION: ${{ secrets.GCP_REGION }}
   TERRAFORM_VERSION: 1.5.0
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
 jobs:
   validate:
@@ -104,6 +105,8 @@ jobs:
         run: |
           chmod +x scripts/complete-infrastructure.sh
           ./scripts/complete-infrastructure.sh ${{ env.ENVIRONMENT }}
+        env:
+          DB_PASSWORD: ${{ env.DB_PASSWORD }}
 
       - name: Test deployment
         run: |
