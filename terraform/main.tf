@@ -46,7 +46,7 @@ resource "google_project_service" "monitoring" {
 resource "google_compute_network" "main" {
   name                    = "${var.project_name}-vpc"
   auto_create_subnetworks = false
-  depends_on             = [google_project_service.compute]
+  depends_on              = [google_project_service.compute]
 }
 
 # Subnet for Web Tier
@@ -402,7 +402,7 @@ resource "google_sql_database_instance" "main" {
   }
 
   deletion_protection = var.environment == "prod"
-  depends_on         = [google_service_networking_connection.private_vpc_connection]
+  depends_on          = [google_service_networking_connection.private_vpc_connection]
 }
 
 # Private VPC Connection for Cloud SQL

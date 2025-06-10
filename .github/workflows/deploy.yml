@@ -40,7 +40,11 @@ jobs:
       - name: Terraform Format
         run: |
           cd terraform
-          terraform fmt -check
+          terraform fmt -recursive
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Terraform files were reformatted. Please commit the changes."
+            git diff
+          fi
 
       - name: Terraform Validate
         run: |
