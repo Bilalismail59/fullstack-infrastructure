@@ -105,49 +105,68 @@ EOF
 echo " Initialisation Terraform..."
 terraform init
 
-# Vérifier s'il y a un verrou bloqué et le supprimer si nécessaire
-echo " Vérification des verrous Terraform..."
-if ! terraform plan -detailed-exitcode -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" >/dev/null 2>&1; then
-    if terraform plan -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" 2>&1 | grep -q "Error acquiring the state lock"; then
-        echo " Verrou détecté, tentative de déverrouillage automatique..."
-        
-        # Extraire l'ID du verrou depuis l'erreur
-        LOCK_ID=$(terraform plan -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" 2>&1 | grep "ID:" | awk '{print $2}' | head -1)
-        
-        if [ -n "$LOCK_ID" ]; then
-            echo " Suppression du verrou $LOCK_ID..."
-            terraform force-unlock -force $LOCK_ID || echo " Impossible de supprimer le verrou automatiquement"
-        fi
-    fi
+# FORCER LA RÉINITIALISATION DE L'ÉTAT ET IMPORTATION
+echo " Réinitialisation forcée de l'état Terraform..."
+gsutil rm -f gs://$BUCKET_NAME/$ENVIRONMENT/terraform/state/default.tfstate* || true
+
+echo " Réinitialisation du backend..."
+terraform init -reconfigure
+
+echo " IMPORTATION FORCÉE des ressources existantes..."
+
+# Importer les ressources une par une
+echo "1. Import VPC..."
+terraform import google_compute_network.main "projects/$PROJECT_ID/global/networks/fullstack-app-vpc" || echo " VPC import failed"
+
+echo "2. Import Health Check Frontend..."
+terraform import google_compute_health_check.frontend "projects/$PROJECT_ID/global/healthChecks/fullstack-app-frontend-hc" || echo " Frontend HC import failed"
+
+echo "3. Import Health Check Backend..."
+terraform import google_compute_health_check.backend "projects/$PROJECT_ID/global/healthChecks/fullstack-app-backend-hc" || echo " Backend HC import failed"
+
+echo "4. Import Global Address..."
+terraform import google_compute_global_address.default "projects/$PROJECT_ID/global/addresses/fullstack-app-lb-ip" || echo " Address import failed"
+
+echo "5. Import Service Account..."
+terraform import google_service_account.compute "projects/$PROJECT_ID/serviceAccounts/fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com" || echo " SA import failed"
+
+# Importer les sous-réseaux s'ils existent
+echo "6. Import Subnets..."
+if gcloud compute networks subnets describe fullstack-app-web-subnet --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_subnetwork.web "projects/$PROJECT_ID/regions/$REGION/subnetworks/fullstack-app-web-subnet" || echo " Web subnet import failed"
 fi
 
-# Vérifier si des ressources existent déjà et les importer avec gestion d'erreur
-echo " Vérification des ressources existantes..."
-
-# Fonction pour importer une ressource si elle existe (avec gestion du verrou)
-import_if_exists() {
-    local RESOURCE_TYPE=$1
-    local RESOURCE_NAME=$2
-    local RESOURCE_ID=$3
-    local TF_RESOURCE=$4
-    
-    if gcloud $RESOURCE_TYPE describe $RESOURCE_NAME --project=$PROJECT_ID $5 >/dev/null 2>&1; then
-        echo " Importation de $RESOURCE_NAME dans Terraform..."
-        terraform import $TF_RESOURCE $RESOURCE_ID 2>/dev/null || echo " $RESOURCE_NAME déjà importé ou erreur d'import"
-    fi
-}
-
-# Importer les ressources existantes (sans arrêter en cas d'erreur)
-import_if_exists "compute networks" "fullstack-app-vpc" "projects/$PROJECT_ID/global/networks/fullstack-app-vpc" "google_compute_network.main" "--quiet"
-import_if_exists "compute health-checks" "fullstack-app-frontend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-frontend-hc" "google_compute_health_check.frontend" "--quiet"
-import_if_exists "compute health-checks" "fullstack-app-backend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-backend-hc" "google_compute_health_check.backend" "--quiet"
-import_if_exists "compute addresses" "fullstack-app-lb-ip" "projects/$PROJECT_ID/global/addresses/fullstack-app-lb-ip" "google_compute_global_address.default" "--global --quiet"
-
-# Importer le service account s'il existe
-if gcloud iam service-accounts describe fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com --project=$PROJECT_ID >/dev/null 2>&1; then
-    echo " Importation du service account dans Terraform..."
-    terraform import google_service_account.compute "projects/$PROJECT_ID/serviceAccounts/fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com" 2>/dev/null || echo " Service account déjà importé ou erreur d'import"
+if gcloud compute networks subnets describe fullstack-app-db-subnet --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_subnetwork.db "projects/$PROJECT_ID/regions/$REGION/subnetworks/fullstack-app-db-subnet" || echo " DB subnet import failed"
 fi
+
+# Importer les règles de firewall s'elles existent
+echo "7. Import Firewall Rules..."
+if gcloud compute firewall-rules describe fullstack-app-allow-http --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_firewall.allow_http "projects/$PROJECT_ID/global/firewalls/fullstack-app-allow-http" || echo " HTTP firewall import failed"
+fi
+
+if gcloud compute firewall-rules describe fullstack-app-allow-ssh --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_firewall.allow_ssh "projects/$PROJECT_ID/global/firewalls/fullstack-app-allow-ssh" || echo " SSH firewall import failed"
+fi
+
+if gcloud compute firewall-rules describe fullstack-app-allow-internal --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_firewall.allow_internal "projects/$PROJECT_ID/global/firewalls/fullstack-app-allow-internal" || echo " Internal firewall import failed"
+fi
+
+if gcloud compute firewall-rules describe fullstack-app-allow-monitoring --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_firewall.allow_monitoring "projects/$PROJECT_ID/global/firewalls/fullstack-app-allow-monitoring" || echo " Monitoring firewall import failed"
+fi
+
+# Importer les adresses privées s'elles existent
+echo "8. Import Private IP Address..."
+if gcloud compute addresses describe fullstack-app-private-ip --global --project=$PROJECT_ID >/dev/null 2>&1; then
+    terraform import google_compute_global_address.private_ip_address "projects/$PROJECT_ID/global/addresses/fullstack-app-private-ip" || echo " Private IP import failed"
+fi
+
+echo " Importation terminée!"
+echo "État Terraform actuel:"
+terraform state list
 
 echo " Planification Terraform..."
 terraform plan \
