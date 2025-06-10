@@ -1,0 +1,10 @@
+{
+  "name": "Preprod Environment",
+  "values": [
+    {
+      "key": "base_url",
+      "value": "http://34.8.29.157",
+      "enabled": true
+    }
+  ]
+}

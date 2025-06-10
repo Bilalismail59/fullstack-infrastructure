@@ -1,0 +1,31 @@
+displayName: "High CPU Usage"
+conditions:
+  - displayName: "CPU usage above 80%"
+    conditionThreshold:
+      filter: 'resource.type="gce_instance"'
+      comparison: COMPARISON_GREATER_THAN
+      thresholdValue: 0.8
+      duration: 300s
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_MEAN
+          crossSeriesReducer: REDUCE_MEAN
+          groupByFields:
+            - resource.label.instance_name
+notificationChannels: []
+alertStrategy:
+  autoClose: 86400s
+---
+displayName: "High Memory Usage"
+conditions:
+  - displayName: "Memory usage above 85%"
+    conditionThreshold:
+      filter: 'resource.type="gce_instance" AND metric.type="compute.googleapis.com/instance/memory/utilization"'
+      comparison: COMPARISON_GREATER_THAN
+      thresholdValue: 0.85
+      duration: 300s
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_MEAN
+          crossSeriesReducer: REDUCE_MEAN
+notificationChannels: []

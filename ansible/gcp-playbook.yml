@@ -1,0 +1,143 @@
+---
+- name: Configure GCP Full Stack Infrastructure
+  hosts: all
+  become: yes
+  vars:
+    environment: "{{ env | default('preprod') }}"
+    
+  tasks:
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - ufw
+          - fail2ban
+          - htop
+          - vim
+          - unzip
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Configure UFW firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop:
+        - '22'
+        - '80'
+        - '443'
+      notify: enable ufw
+
+    - name: Configure fail2ban
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 3
+          
+          [sshd]
+          enabled = true
+          port = ssh
+          logpath = /var/log/auth.log
+          maxretry = 3
+      notify: restart fail2ban
+
+    - name: Start and enable fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    - name: Create application user
+      user:
+        name: appuser
+        shell: /bin/bash
+        create_home: yes
+        groups: docker
+        append: yes
+
+    - name: Configure SSH security
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        backup: yes
+      loop:
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 3' }
+        - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval 300' }
+        - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax 2' }
+      notify: restart sshd
+
+    - name: Install Google Cloud Ops Agent
+      shell: |
+        curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
+        bash add-google-cloud-ops-agent-repo.sh --also-install
+      args:
+        creates: /etc/google-cloud-ops-agent
+
+    - name: Configure Cloud Ops Agent
+      copy:
+        dest: /etc/google-cloud-ops-agent/config.yaml
+        content: |
+          logging:
+            receivers:
+              syslog:
+                type: files
+                include_paths:
+                  - /var/log/syslog
+                  - /var/log/auth.log
+              apache_access:
+                type: files
+                include_paths:
+                  - /var/log/apache2/access.log
+              apache_error:
+                type: files
+                include_paths:
+                  - /var/log/apache2/error.log
+            service:
+              pipelines:
+                default_pipeline:
+                  receivers: [syslog, apache_access, apache_error]
+          
+          metrics:
+            receivers:
+              hostmetrics:
+                type: hostmetrics
+                collection_interval: 60s
+            service:
+              pipelines:
+                default_pipeline:
+                  receivers: [hostmetrics]
+      notify: restart google-cloud-ops-agent
+
+  handlers:
+    - name: enable ufw
+      ufw:
+        state: enabled
+
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: restart sshd
+      systemd:
+        name: sshd
+        state: restarted
+
+    - name: restart google-cloud-ops-agent
+      systemd:
+        name: google-cloud-ops-agent
+        state: restarted

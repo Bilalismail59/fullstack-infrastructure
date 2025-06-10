@@ -1,0 +1,30 @@
+all:
+  children:
+    frontend:
+      hosts:
+        prod-frontend-1:
+          ansible_host: 10.0.1.10
+          ansible_user: ec2-user
+          ansible_ssh_private_key_file: ~/.ssh/prod-key.pem
+        prod-frontend-2:
+          ansible_host: 10.0.2.10
+          ansible_user: ec2-user
+          ansible_ssh_private_key_file: ~/.ssh/prod-key.pem
+    backend:
+      hosts:
+        prod-backend-1:
+          ansible_host: 10.0.10.10
+          ansible_user: ec2-user
+          ansible_ssh_private_key_file: ~/.ssh/prod-key.pem
+        prod-backend-2:
+          ansible_host: 10.0.11.10
+          ansible_user: ec2-user
+          ansible_ssh_private_key_file: ~/.ssh/prod-key.pem
+    monitoring:
+      hosts:
+        prod-monitoring-1:
+          ansible_host: 10.0.1.20
+          ansible_user: ec2-user
+          ansible_ssh_private_key_file: ~/.ssh/prod-key.pem
+  vars:
+    env: prod

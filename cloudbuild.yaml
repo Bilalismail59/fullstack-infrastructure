@@ -1,0 +1,50 @@
+# Configuration Cloud Build pour CI/CD alternatif
+steps:
+  # Build frontend
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA', './frontend']
+    id: 'build-frontend'
+
+  # Build backend
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/backend:$COMMIT_SHA', './backend']
+    id: 'build-backend'
+
+  # Push images
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA']
+    id: 'push-frontend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/backend:$COMMIT_SHA']
+    id: 'push-backend'
+
+  # Deploy to GKE
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - run
+      - --filename=k8s/
+      - --image=gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA
+      - --cluster=fullstack-app-preprod-cluster
+      - --location=europe-west1
+      - --namespace=fullstack-app-preprod
+
+  # Run tests
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['test']
+    dir: 'frontend'
+
+  # Security scan
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'beta'
+      - 'container'
+      - 'images'
+      - 'scan'
+      - 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA'
+
+substitutions:
+  _ENVIRONMENT: 'preprod'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fullstack-app-preprod
+  labels:
+    name: fullstack-app-preprod
+    environment: preprod
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fullstack-app-prod
+  labels:
+    name: fullstack-app-prod
+    environment: prod

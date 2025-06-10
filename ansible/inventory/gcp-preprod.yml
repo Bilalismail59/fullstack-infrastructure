@@ -1,0 +1,24 @@
+all:
+  children:
+    frontend:
+      hosts:
+        preprod-frontend:
+          ansible_host: "{{ hostvars['localhost']['frontend_ip'] }}"
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gcp-key
+    backend:
+      hosts:
+        preprod-backend:
+          ansible_host: "{{ hostvars['localhost']['backend_ip'] }}"
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gcp-key
+    monitoring:
+      hosts:
+        preprod-monitoring:
+          ansible_host: "{{ hostvars['localhost']['monitoring_ip'] }}"
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gcp-key
+  vars:
+    env: preprod
+    gcp_project: primordial-port-462408-q7
+    gcp_region: europe-west1

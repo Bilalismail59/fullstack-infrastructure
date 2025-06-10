@@ -1,0 +1,434 @@
+name: Complete CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+env:
+  GCP_PROJECT_ID: primordial-port-462408-q7
+  GCP_REGION: europe-west1
+  GCP_ZONE: europe-west1-b
+  TERRAFORM_VERSION: 1.5.0
+  KUBECTL_VERSION: 1.28.0
+
+jobs:
+  # ==================== QUALITY CHECKS ====================
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run ESLint
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Run tests with coverage
+        run: |
+          cd frontend
+          npm run test:coverage
+
+      - name: SonarQube Scan
+        uses: sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Security scan with Snyk
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # ==================== BUILD IMAGES ====================
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: code-quality
+    outputs:
+      frontend-image: ${{ steps.build.outputs.frontend-image }}
+      backend-image: ${{ steps.build.outputs.backend-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build and push frontend image
+        id: build
+        run: |
+          cd frontend
+          IMAGE_TAG="gcr.io/${{ env.GCP_PROJECT_ID }}/frontend:${{ github.sha }}"
+          docker build -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
+          echo "frontend-image=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          
+          # Also tag as latest for the current branch
+          BRANCH_TAG="gcr.io/${{ env.GCP_PROJECT_ID }}/frontend:${{ github.ref_name }}"
+          docker tag $IMAGE_TAG $BRANCH_TAG
+          docker push $BRANCH_TAG
+
+      - name: Build and push backend image
+        run: |
+          cd backend
+          IMAGE_TAG="gcr.io/${{ env.GCP_PROJECT_ID }}/backend:${{ github.sha }}"
+          docker build -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
+          echo "backend-image=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ==================== INFRASTRUCTURE ====================
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: code-quality
+    strategy:
+      matrix:
+        environment: [preprod, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          export GOOGLE_APPLICATION_CREDENTIALS="service-account-key.json"
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          terraform init
+
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          export GOOGLE_APPLICATION_CREDENTIALS="service-account-key.json"
+          terraform plan \
+            -var-file="${{ matrix.environment }}.tfvars" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="domain_name=${{ secrets.DOMAIN_NAME }}" \
+            -out=tfplan-${{ matrix.environment }}
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: terraform/tfplan-${{ matrix.environment }}
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, build-images]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    strategy:
+      matrix:
+        environment: [preprod, prod]
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: terraform/
+
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          export GOOGLE_APPLICATION_CREDENTIALS="service-account-key.json"
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          terraform init
+          terraform apply -auto-approve tfplan-${{ matrix.environment }}
+
+  # ==================== KUBERNETES DEPLOYMENT ====================
+  deploy-to-kubernetes:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [terraform-apply, build-images]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    strategy:
+      matrix:
+        environment: [preprod, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials fullstack-app-${{ matrix.environment }}-cluster \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT_ID }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          # Create namespace if it doesn't exist
+          kubectl create namespace fullstack-app-${{ matrix.environment }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply configurations
+          kubectl apply -f k8s/configmap.yml -n fullstack-app-${{ matrix.environment }}
+          
+          # Create database secret
+          kubectl create secret generic db-secret \
+            --from-literal=host=${{ secrets.DB_HOST }} \
+            --from-literal=username=wordpress \
+            --from-literal=password=${{ secrets.DB_PASSWORD }} \
+            --from-literal=database=wordpress \
+            -n fullstack-app-${{ matrix.environment }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Update image tags in deployments
+          sed -i 's|gcr.io/primordial-port-462408-q7/frontend:latest|${{ needs.build-images.outputs.frontend-image }}|g' k8s/frontend-deployment.yml
+          
+          # Deploy applications
+          kubectl apply -f k8s/pvc.yml -n fullstack-app-${{ matrix.environment }}
+          kubectl apply -f k8s/backend-deployment.yml -n fullstack-app-${{ matrix.environment }}
+          kubectl apply -f k8s/frontend-deployment.yml -n fullstack-app-${{ matrix.environment }}
+          kubectl apply -f k8s/ingress.yml -n fullstack-app-${{ matrix.environment }}
+          
+          # Wait for rollout
+          kubectl rollout status deployment/frontend-deployment -n fullstack-app-${{ matrix.environment }}
+          kubectl rollout status deployment/backend-deployment -n fullstack-app-${{ matrix.environment }}
+
+  # ==================== INTEGRATION TESTS ====================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: deploy-to-kubernetes
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install test dependencies
+        run: |
+          npm install -g newman
+          cd tests
+          npm ci
+
+      - name: Run API tests
+        run: |
+          cd tests
+          newman run postman-collection.json \
+            --environment postman-environment-preprod.json \
+            --reporters cli,junit \
+            --reporter-junit-export results.xml
+
+      - name: Run E2E tests
+        run: |
+          cd tests
+          npm run test:e2e
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/results.xml
+
+  # ==================== SECURITY SCANNING ====================
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: deploy-to-kubernetes
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-images.outputs.frontend-image }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ==================== PERFORMANCE TESTS ====================
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: deploy-to-kubernetes
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run performance tests
+        run: |
+          cd tests/performance
+          k6 run --out json=results.json load-test.js
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: tests/performance/results.json
+
+  # ==================== PRODUCTION DEPLOYMENT ====================
+  deploy-to-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [integration-tests, security-scan, performance-tests]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials fullstack-app-prod-cluster \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT_ID }}
+
+      - name: Blue-Green Deployment
+        run: |
+          # Create blue-green deployment script
+          ./scripts/blue-green-deploy.sh prod ${{ needs.build-images.outputs.frontend-image }}
+
+  # ==================== MONITORING & ALERTS ====================
+  setup-monitoring:
+    name: Setup Monitoring
+    runs-on: ubuntu-latest
+    needs: deploy-to-production
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Create monitoring dashboards
+        run: |
+          gcloud monitoring dashboards create --config-from-file=monitoring/gcp-dashboard.json
+
+      - name: Setup alerting policies
+        run: |
+          gcloud alpha monitoring policies create --policy-from-file=monitoring/alert-policies.yaml
+
+  # ==================== NOTIFICATIONS ====================
+  notify-deployment:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-to-production, setup-monitoring]
+    if: always()
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            🚀 Deployment completed!
+            Environment: Production
+            Status: ${{ job.status }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+
+      - name: Notify Teams
+        uses: skitionek/notify-microsoft-teams@master
+        if: always()
+        with:
+          webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
+          needs: ${{ toJson(needs) }}
+          job: ${{ toJson(job) }}
+
+  # ==================== ROLLBACK ====================
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: deploy-to-production
+    if: failure()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Rollback deployment
+        run: |
+          ./scripts/rollback-deployment.sh prod
