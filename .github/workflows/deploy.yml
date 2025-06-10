@@ -19,6 +19,8 @@ on:
         options:
           - preprod
           - prod
+          - unlock
+          - import
           - cleanup
 
 env:
@@ -31,7 +33,7 @@ jobs:
   validate:
     name: Validate Code
     runs-on: ubuntu-latest
-    if: github.event.inputs.environment != 'cleanup'
+    if: github.event.inputs.environment != 'unlock' && github.event.inputs.environment != 'cleanup' && github.event.inputs.environment != 'import'
     steps:
       - uses: actions/checkout@v4
 
@@ -63,10 +65,66 @@ jobs:
         run: |
           find scripts -name "*.sh" -type f -exec bash -n {} \;
 
+  unlock:
+    name: Force Unlock Terraform
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'unlock'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Create service account key file
+        run: |
+          cd terraform
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+
+      - name: Force unlock Terraform
+        run: |
+          chmod +x scripts/force-unlock-terraform.sh
+          ./scripts/force-unlock-terraform.sh prod
+
+  import:
+    name: Import Existing Resources
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'import'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Create service account key file
+        run: |
+          cd terraform
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+
+      - name: Import existing resources
+        run: |
+          chmod +x scripts/import-resources.sh
+          ./scripts/import-resources.sh prod
+
   deploy:
     name: Deploy Infrastructure
     needs: validate
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.inputs.environment != 'cleanup'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.inputs.environment != 'unlock' && github.event.inputs.environment != 'cleanup' && github.event.inputs.environment != 'import'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -103,10 +161,11 @@ jobs:
           gcloud auth activate-service-account --key-file=terraform/service-account-key.json
           gcloud config set project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy infrastructure (without lock)
+      - name: Deploy infrastructure
         run: |
-          chmod +x scripts/deploy-without-lock.sh
-          ./scripts/deploy-without-lock.sh ${{ env.ENVIRONMENT }}
+          chmod +x scripts/complete-infrastructure.sh
+          chmod +x scripts/import-existing-resources.sh
+          ./scripts/complete-infrastructure.sh ${{ env.ENVIRONMENT }}
         env:
           DB_PASSWORD: ${{ env.DB_PASSWORD }}
 
