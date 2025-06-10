@@ -373,9 +373,9 @@ resource "google_sql_database_instance" "main" {
     tier = var.db_tier
 
     backup_configuration {
-      enabled                        = true
-      start_time                     = "03:00"
-      point_in_time_recovery_enabled = var.environment == "prod"
+      enabled                = true
+      start_time             = "03:00"
+      binary_log_enabled     = var.environment == "prod"
       backup_retention_settings {
         retained_backups = var.environment == "prod" ? 7 : 3
       }
