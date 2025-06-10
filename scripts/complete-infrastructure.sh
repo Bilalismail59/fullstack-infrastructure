@@ -105,10 +105,26 @@ EOF
 echo " Initialisation Terraform..."
 terraform init
 
-# Vérifier si des ressources existent déjà
+# Vérifier s'il y a un verrou bloqué et le supprimer si nécessaire
+echo " Vérification des verrous Terraform..."
+if ! terraform plan -detailed-exitcode -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" >/dev/null 2>&1; then
+    if terraform plan -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" 2>&1 | grep -q "Error acquiring the state lock"; then
+        echo " Verrou détecté, tentative de déverrouillage automatique..."
+        
+        # Extraire l'ID du verrou depuis l'erreur
+        LOCK_ID=$(terraform plan -var="environment=$ENVIRONMENT" -var="project_id=$PROJECT_ID" -var="region=$REGION" -var="zone=$ZONE" -var="db_password=${DB_PASSWORD:-SecurePassword123!}" 2>&1 | grep "ID:" | awk '{print $2}' | head -1)
+        
+        if [ -n "$LOCK_ID" ]; then
+            echo " Suppression du verrou $LOCK_ID..."
+            terraform force-unlock -force $LOCK_ID || echo " Impossible de supprimer le verrou automatiquement"
+        fi
+    fi
+fi
+
+# Vérifier si des ressources existent déjà et les importer avec gestion d'erreur
 echo " Vérification des ressources existantes..."
 
-# Fonction pour importer une ressource si elle existe
+# Fonction pour importer une ressource si elle existe (avec gestion du verrou)
 import_if_exists() {
     local RESOURCE_TYPE=$1
     local RESOURCE_NAME=$2
@@ -117,11 +133,11 @@ import_if_exists() {
     
     if gcloud $RESOURCE_TYPE describe $RESOURCE_NAME --project=$PROJECT_ID $5 >/dev/null 2>&1; then
         echo " Importation de $RESOURCE_NAME dans Terraform..."
-        terraform import $TF_RESOURCE $RESOURCE_ID || echo "⚠️ Impossible d'importer $RESOURCE_NAME, peut-être déjà importé"
+        terraform import $TF_RESOURCE $RESOURCE_ID 2>/dev/null || echo " $RESOURCE_NAME déjà importé ou erreur d'import"
     fi
 }
 
-# Importer les ressources existantes
+# Importer les ressources existantes (sans arrêter en cas d'erreur)
 import_if_exists "compute networks" "fullstack-app-vpc" "projects/$PROJECT_ID/global/networks/fullstack-app-vpc" "google_compute_network.main" "--quiet"
 import_if_exists "compute health-checks" "fullstack-app-frontend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-frontend-hc" "google_compute_health_check.frontend" "--quiet"
 import_if_exists "compute health-checks" "fullstack-app-backend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-backend-hc" "google_compute_health_check.backend" "--quiet"
@@ -130,7 +146,7 @@ import_if_exists "compute addresses" "fullstack-app-lb-ip" "projects/$PROJECT_ID
 # Importer le service account s'il existe
 if gcloud iam service-accounts describe fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com --project=$PROJECT_ID >/dev/null 2>&1; then
     echo " Importation du service account dans Terraform..."
-    terraform import google_service_account.compute "projects/$PROJECT_ID/serviceAccounts/fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com" || echo "⚠️ Impossible d'importer le service account, peut-être déjà importé"
+    terraform import google_service_account.compute "projects/$PROJECT_ID/serviceAccounts/fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com" 2>/dev/null || echo " Service account déjà importé ou erreur d'import"
 fi
 
 echo " Planification Terraform..."
