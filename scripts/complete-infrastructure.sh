@@ -1,69 +1,116 @@
 #!/bin/bash
 
-# Script pour déployer l'infrastructure complète (preprod et prod avec Kubernetes)
+# Script pour déployer l'infrastructure complète avec support GitHub Actions
 set -e
 
-echo " Déploiement de l'infrastructure complète (preprod et prod avec Kubernetes)"
-echo "  ATTENTION: Ceci va créer des ressources dans les environnements de preprod ET prod"
-read -p "Êtes-vous sûr de vouloir continuer? (yes/no): " confirm
+# Récupérer les variables d'environnement ou utiliser les valeurs par défaut
+PROJECT_ID=${GCP_PROJECT_ID:-"primordial-port-462408-q7"}
+REGION=${GCP_REGION:-"europe-west1"}
+ZONE="${REGION}-b"
 
-if [ "$confirm" != "yes" ]; then
-    echo " Déploiement annulé"
-    exit 0
+echo " Déploiement de l'infrastructure complète"
+echo "==========================================="
+
+# Détection de l'environnement
+if [ -n "$GITHUB_ACTIONS" ]; then
+    echo " Mode GitHub Actions détecté"
+    ENVIRONMENT=${1:-preprod}
+else
+    echo " Mode déploiement local"
+    ENVIRONMENT=${1:-preprod}
+    
+    # Vérifier les prérequis locaux
+    if ! command -v gcloud >/dev/null 2>&1; then
+        echo " gcloud CLI manquant. Exécutez: ./scripts/install-tools.sh"
+        exit 1
+    fi
+    
+    if ! command -v terraform >/dev/null 2>&1; then
+        echo " Terraform manquant. Exécutez: ./scripts/install-tools.sh"
+        exit 1
+    fi
 fi
 
-# 1. Déployer l'environnement de préproduction
-echo " Déploiement de l'environnement de PRÉPRODUCTION..."
-cd terraform
-export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
-
-terraform plan \
-    -var="environment=preprod" \
-    -var="project_id=primordial-port-462408-q7" \
-    -var="region=europe-west1" \
-    -var="zone=europe-west1-b" \
-    -var="db_password=SecurePassword123!" \
-    -out=tfplan-preprod
-
-terraform apply -auto-approve tfplan-preprod
-cd ..
-
-# 2. Créer le cluster Kubernetes pour la préproduction
-echo " Création du cluster Kubernetes pour la PRÉPRODUCTION..."
-./scripts/create-gke-cluster.sh preprod
-
-# 3. Déployer les applications sur Kubernetes (préproduction)
-echo " Déploiement des applications sur Kubernetes (PRÉPRODUCTION)..."
-./scripts/deploy-to-kubernetes.sh preprod
-
-# 4. Déployer l'environnement de production
-echo " Déploiement de l'environnement de PRODUCTION..."
-cd terraform
-terraform plan \
-    -var="environment=prod" \
-    -var="project_id=primordial-port-462408-q7" \
-    -var="region=europe-west1" \
-    -var="zone=europe-west1-b" \
-    -var="db_password=SecurePassword123!" \
-    -out=tfplan-prod
-
-terraform apply -auto-approve tfplan-prod
-cd ..
-
-# 5. Créer le cluster Kubernetes pour la production
-echo " Création du cluster Kubernetes pour la PRODUCTION..."
-./scripts/create-gke-cluster.sh prod
-
-# 6. Déployer les applications sur Kubernetes (production)
-echo " Déploiement des applications sur Kubernetes (PRODUCTION)..."
-./scripts/deploy-to-kubernetes.sh prod
-
-echo " Déploiement de l'infrastructure complète terminé!"
+echo "Environment: $ENVIRONMENT"
+echo "Project: $PROJECT_ID"
+echo "Region: $REGION"
 echo ""
-echo " Résumé:"
-echo "   Environnement de PRÉPRODUCTION déployé"
-echo "   Cluster Kubernetes de PRÉPRODUCTION créé"
-echo "   Applications déployées sur Kubernetes (PRÉPRODUCTION)"
-echo "   Environnement de PRODUCTION déployé"
-echo "   Cluster Kubernetes de PRODUCTION créé"
-echo "   Applications déployées sur Kubernetes (PRODUCTION)"
+
+# Confirmation pour la production
+if [ "$ENVIRONMENT" = "prod" ] && [ -z "$GITHUB_ACTIONS" ]; then
+    read -p "  Déploiement en PRODUCTION. Continuer? (yes/no): " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo " Déploiement annulé"
+        exit 0
+    fi
+fi
+
+cd terraform
+
+# Configuration des credentials selon l'environnement
+if [ -n "$GITHUB_ACTIONS" ]; then
+    echo " Configuration GitHub Actions..."
+    export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
+else
+    echo " Configuration locale..."
+    if [ ! -f "service-account-key.json" ]; then
+        echo " Fichier service-account-key.json manquant"
+        exit 1
+    fi
+    export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
+    gcloud auth activate-service-account --key-file=service-account-key.json
+    gcloud config set project $PROJECT_ID
+fi
+
+# Créer le bucket Terraform state
+BUCKET_NAME="${PROJECT_ID}-terraform-state"
+gsutil mb -p $PROJECT_ID -c STANDARD -l $REGION gs://$BUCKET_NAME/ 2>/dev/null || echo "✅ Bucket state existe déjà"
+gsutil versioning set on gs://$BUCKET_NAME/
+
+# Configuration du backend
+cat > backend.tf << EOF
+terraform {
+  backend "gcs" {
+    bucket      = "$BUCKET_NAME"
+    prefix      = "$ENVIRONMENT/terraform/state"
+    credentials = "service-account-key.json"
+  }
+}
+EOF
+
+echo " Initialisation Terraform..."
+terraform init
+
+echo " Planification Terraform..."
+terraform plan \
+    -var="environment=$ENVIRONMENT" \
+    -var="project_id=$PROJECT_ID" \
+    -var="region=$REGION" \
+    -var="zone=$ZONE" \
+    -var="db_password=SecurePassword123!" \
+    -out=tfplan-$ENVIRONMENT
+
+echo " Application Terraform..."
+terraform apply -auto-approve tfplan-$ENVIRONMENT
+
+# Récupérer les outputs
+LB_IP=$(terraform output -raw load_balancer_ip 2>/dev/null || echo "N/A")
+MONITORING_IP=$(terraform output -raw monitoring_instance_ip 2>/dev/null || echo "N/A")
+
+echo ""
+echo " Déploiement terminé!"
+echo "======================"
+echo " URLs d'accès:"
+echo "  - Application: http://$LB_IP"
+echo "  - Grafana: http://$MONITORING_IP:3000 (admin/admin123)"
+echo "  - Prometheus: http://$MONITORING_IP:9090"
+echo ""
+
+# Test automatique si pas en mode GitHub Actions
+if [ -z "$GITHUB_ACTIONS" ]; then
+    echo " Lancement des tests..."
+    cd ..
+    ./scripts/wait-and-test.sh
+fi
+
+cd ..
