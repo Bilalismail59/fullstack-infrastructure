@@ -105,6 +105,34 @@ EOF
 echo " Initialisation Terraform..."
 terraform init
 
+# Vérifier si des ressources existent déjà
+echo " Vérification des ressources existantes..."
+
+# Fonction pour importer une ressource si elle existe
+import_if_exists() {
+    local RESOURCE_TYPE=$1
+    local RESOURCE_NAME=$2
+    local RESOURCE_ID=$3
+    local TF_RESOURCE=$4
+    
+    if gcloud $RESOURCE_TYPE describe $RESOURCE_NAME --project=$PROJECT_ID $5 >/dev/null 2>&1; then
+        echo " Importation de $RESOURCE_NAME dans Terraform..."
+        terraform import $TF_RESOURCE $RESOURCE_ID || echo "⚠️ Impossible d'importer $RESOURCE_NAME, peut-être déjà importé"
+    fi
+}
+
+# Importer les ressources existantes
+import_if_exists "compute networks" "fullstack-app-vpc" "projects/$PROJECT_ID/global/networks/fullstack-app-vpc" "google_compute_network.main" "--quiet"
+import_if_exists "compute health-checks" "fullstack-app-frontend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-frontend-hc" "google_compute_health_check.frontend" "--quiet"
+import_if_exists "compute health-checks" "fullstack-app-backend-hc" "projects/$PROJECT_ID/global/healthChecks/fullstack-app-backend-hc" "google_compute_health_check.backend" "--quiet"
+import_if_exists "compute addresses" "fullstack-app-lb-ip" "projects/$PROJECT_ID/global/addresses/fullstack-app-lb-ip" "google_compute_global_address.default" "--global --quiet"
+
+# Importer le service account s'il existe
+if gcloud iam service-accounts describe fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com --project=$PROJECT_ID >/dev/null 2>&1; then
+    echo " Importation du service account dans Terraform..."
+    terraform import google_service_account.compute "projects/$PROJECT_ID/serviceAccounts/fullstack-app-compute-sa@$PROJECT_ID.iam.gserviceaccount.com" || echo "⚠️ Impossible d'importer le service account, peut-être déjà importé"
+fi
+
 echo " Planification Terraform..."
 terraform plan \
     -var="environment=$ENVIRONMENT" \
