@@ -26,18 +26,22 @@ provider "google-beta" {
 # Enable required APIs
 resource "google_project_service" "compute" {
   service = "compute.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service" "container" {
   service = "container.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service" "sql" {
   service = "sqladmin.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service" "monitoring" {
   service = "monitoring.googleapis.com"
+  disable_on_destroy = false
 }
 
 # VPC Network
@@ -45,6 +49,10 @@ resource "google_compute_network" "main" {
   name                    = "${var.project_name}-vpc"
   auto_create_subnetworks = false
   depends_on              = [google_project_service.compute]
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Subnet for Web Tier
@@ -63,6 +71,10 @@ resource "google_compute_subnetwork" "web" {
     range_name    = "services"
     ip_cidr_range = "10.2.0.0/16"
   }
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Subnet for Database Tier
@@ -71,6 +83,10 @@ resource "google_compute_subnetwork" "db" {
   ip_cidr_range = "10.0.2.0/24"
   region        = var.region
   network       = google_compute_network.main.id
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Firewall Rules
@@ -85,6 +101,10 @@ resource "google_compute_firewall" "allow_http" {
 
   source_ranges = ["0.0.0.0/0"]
   target_tags   = ["web-server"]
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_firewall" "allow_ssh" {
@@ -98,6 +118,10 @@ resource "google_compute_firewall" "allow_ssh" {
 
   source_ranges = [var.admin_cidr]
   target_tags   = ["web-server"]
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_firewall" "allow_internal" {
@@ -115,6 +139,10 @@ resource "google_compute_firewall" "allow_internal" {
   }
 
   source_ranges = ["10.0.0.0/8"]
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_firewall" "allow_monitoring" {
@@ -128,6 +156,10 @@ resource "google_compute_firewall" "allow_monitoring" {
 
   source_ranges = ["10.0.0.0/8"]
   target_tags   = ["monitoring"]
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Instance Template for Frontend
@@ -264,6 +296,10 @@ resource "google_compute_health_check" "frontend" {
   timeout_sec         = 5
   healthy_threshold   = 2
   unhealthy_threshold = 3
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_health_check" "backend" {
@@ -278,11 +314,19 @@ resource "google_compute_health_check" "backend" {
   timeout_sec         = 5
   healthy_threshold   = 2
   unhealthy_threshold = 3
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Load Balancer
 resource "google_compute_global_address" "default" {
   name = "${var.project_name}-lb-ip"
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_compute_backend_service" "frontend" {
@@ -434,6 +478,10 @@ resource "google_sql_user" "wordpress" {
 resource "google_service_account" "compute" {
   account_id   = "${var.project_name}-compute-sa"
   display_name = "Compute Service Account"
+  
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_project_iam_member" "compute_monitoring" {
