@@ -19,6 +19,8 @@ on:
         options:
           - preprod
           - prod
+          - unlock
+          - cleanup
 
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -30,6 +32,7 @@ jobs:
   validate:
     name: Validate Code
     runs-on: ubuntu-latest
+    if: github.event.inputs.environment != 'unlock' && github.event.inputs.environment != 'cleanup'
     steps:
       - uses: actions/checkout@v4
 
@@ -61,10 +64,38 @@ jobs:
         run: |
           find scripts -name "*.sh" -type f -exec bash -n {} \;
 
+  unlock:
+    name: Force Unlock Terraform
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'unlock'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Create service account key file
+        run: |
+          cd terraform
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+
+      - name: Force unlock Terraform
+        run: |
+          chmod +x scripts/force-unlock-terraform.sh
+          ./scripts/force-unlock-terraform.sh prod
+
   deploy:
     name: Deploy Infrastructure
     needs: validate
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.inputs.environment != 'unlock' && github.event.inputs.environment != 'cleanup'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,10 +132,10 @@ jobs:
           gcloud auth activate-service-account --key-file=terraform/service-account-key.json
           gcloud config set project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy infrastructure
+      - name: Deploy infrastructure (without lock)
         run: |
-          chmod +x scripts/complete-infrastructure.sh
-          ./scripts/complete-infrastructure.sh ${{ env.ENVIRONMENT }}
+          chmod +x scripts/deploy-without-lock.sh
+          ./scripts/deploy-without-lock.sh ${{ env.ENVIRONMENT }}
         env:
           DB_PASSWORD: ${{ env.DB_PASSWORD }}
 
@@ -128,7 +159,7 @@ jobs:
   cleanup:
     name: Cleanup Resources
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && contains(github.event.inputs.environment, 'cleanup')
+    if: github.event.inputs.environment == 'cleanup'
     steps:
       - uses: actions/checkout@v4
 
@@ -141,4 +172,4 @@ jobs:
       - name: Run cleanup script
         run: |
           chmod +x scripts/cleanup-gcp.sh
-          ./scripts/cleanup-gcp.sh preprod
+          ./scripts/cleanup-gcp.sh prod
