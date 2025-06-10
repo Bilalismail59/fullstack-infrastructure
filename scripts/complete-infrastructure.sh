@@ -55,19 +55,21 @@ cd terraform
 
 # Configuration des credentials selon l'environnement
 if [ -n "$GITHUB_ACTIONS" ]; then
-    echo " Configuration GitHub Actions..."
-    export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
-    gcloud auth activate-service-account --key-file=service-account-key.json
-    gcloud config set project $PROJECT_ID
+  echo " Configuration GitHub Actions..."
+  export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
+  gcloud auth activate-service-account --key-file=service-account-key.json
+  gcloud config set project $PROJECT_ID
 else
-    echo " Configuration locale..."
-    if [ ! -f "service-account-key.json" ]; then
-        echo " Fichier service-account-key.json manquant"
-        exit 1
-    fi
-    export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
-    gcloud auth activate-service-account --key-file=service-account-key.json
-    gcloud config set project $PROJECT_ID
+  echo " Configuration locale..."
+  # Vérifier l'authentification
+  if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q "@"; then
+      echo " Non authentifié. Exécutez: gcloud auth login"
+      exit 1
+  fi
+  
+  # Utiliser la clé de service déjà créée
+  export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
+  gcloud config set project $PROJECT_ID
 fi
 
 echo " Planification Terraform..."
@@ -80,7 +82,7 @@ terraform plan \
     -out=tfplan-$ENVIRONMENT
 
 echo " Application Terraform..."
-terraform apply -auto-approve tfplan-$ENVIRONMENT
+terraform apply tfplan-$ENVIRONMENT
 
 # Récupérer les outputs
 LB_IP=$(terraform output -raw load_balancer_ip 2>/dev/null || echo "N/A")
