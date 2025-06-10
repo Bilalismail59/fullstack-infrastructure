@@ -7,19 +7,19 @@ set -e
 exec > >(tee /var/log/startup-script.log)
 exec 2>&1
 
-echo "🚀 Démarrage du script frontend - $(date)"
+echo " Démarrage du script frontend - $(date)"
 
 # Mise à jour du système
-echo "📦 Mise à jour du système..."
+echo " Mise à jour du système..."
 apt-get update
 apt-get upgrade -y
 
 # Installation des dépendances de base
-echo "🔧 Installation des dépendances..."
+echo " Installation des dépendances..."
 apt-get install -y curl wget git nginx ufw fail2ban htop vim unzip
 
 # Installation de Node.js 18
-echo "📦 Installation de Node.js 18..."
+echo " Installation de Node.js 18..."
 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
 apt-get install -y nodejs
 
@@ -28,7 +28,7 @@ node --version
 npm --version
 
 # Configuration du firewall
-echo "🔥 Configuration du firewall..."
+echo " Configuration du firewall..."
 ufw allow 22
 ufw allow 80
 ufw allow 443
@@ -41,7 +41,7 @@ useradd -m -s /bin/bash appuser
 usermod -aG sudo appuser
 
 # Création d'une application Vite simple
-echo "🏗️ Création de l'application frontend..."
+echo " Création de l'application frontend..."
 cd /home/appuser
 mkdir -p app
 cd app
@@ -159,7 +159,7 @@ function App() {
         borderRadius: '8px',
         marginBottom: '20px'
       }}>
-        <h1>🚀 Fullstack Application</h1>
+        <h1> Fullstack Application</h1>
         <p>Frontend React + Backend WordPress + Database MySQL</p>
       </header>
 
@@ -174,8 +174,8 @@ function App() {
           borderRadius: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
-          <h2>🖥️ Frontend</h2>
-          <p><strong>Status:</strong> <span style={{color: 'green'}}>✅ Running</span></p>
+          <h2> Frontend</h2>
+          <p><strong>Status:</strong> <span style={{color: 'green'}}> Running</span></p>
           <p><strong>Framework:</strong> React + Vite</p>
           <p><strong>Port:</strong> 3000</p>
         </div>
@@ -186,9 +186,9 @@ function App() {
           borderRadius: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
-          <h2>⚙️ Backend</h2>
+          <h2> Backend</h2>
           <p><strong>Status:</strong> <span style={{color: backendStatus === 'Connected' ? 'green' : 'red'}}>
-            {backendStatus === 'Connected' ? '✅' : '❌'} {backendStatus}
+            {backendStatus === 'Connected' ? '' : ''} {backendStatus}
           </span></p>
           <p><strong>Framework:</strong> WordPress</p>
           <p><strong>API:</strong> REST API</p>
@@ -200,9 +200,9 @@ function App() {
           borderRadius: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
-          <h2>🗄️ Database</h2>
+          <h2> Database</h2>
           <p><strong>Status:</strong> <span style={{color: dbStatus === 'Connected' ? 'green' : 'red'}}>
-            {dbStatus === 'Connected' ? '✅' : '❌'} {dbStatus}
+            {dbStatus === 'Connected' ? '' : ''} {dbStatus}
           </span></p>
           <p><strong>Type:</strong> MySQL 8.0</p>
           <p><strong>Host:</strong> Cloud SQL</p>
@@ -216,7 +216,7 @@ function App() {
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         marginTop: '20px'
       }}>
-        <h2>📊 System Information</h2>
+        <h2> System Information</h2>
         <p><strong>Environment:</strong> Google Cloud Platform</p>
         <p><strong>Load Balancer:</strong> 34.8.29.157</p>
         <p><strong>Monitoring:</strong> 34.77.227.135:3000</p>
@@ -233,20 +233,20 @@ EOF
 chown -R appuser:appuser /home/appuser/app
 
 # Installation des dépendances
-echo "📦 Installation des dépendances npm..."
+echo " Installation des dépendances npm..."
 cd /home/appuser/app
 sudo -u appuser npm install
 
 # Build de l'application
-echo "🏗️ Build de l'application..."
+echo " Build de l'application..."
 sudo -u appuser npm run build
 
 # Installation de PM2
-echo "📦 Installation de PM2..."
+echo " Installation de PM2..."
 npm install -g pm2
 
 # Configuration de Nginx
-echo "🌐 Configuration de Nginx..."
+echo " Configuration de Nginx..."
 cat > /etc/nginx/sites-available/default << 'EOF'
 server {
     listen 80 default_server;
@@ -295,7 +295,7 @@ systemctl enable nginx
 systemctl reload nginx
 
 # Installation de Node Exporter pour monitoring
-echo "📊 Installation de Node Exporter..."
+echo " Installation de Node Exporter..."
 wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
 tar xvfz node_exporter-1.6.1.linux-amd64.tar.gz
 cp node_exporter-1.6.1.linux-amd64/node_exporter /usr/local/bin/
@@ -324,10 +324,10 @@ systemctl start node_exporter
 systemctl enable node_exporter
 
 # Installation de Google Cloud Ops Agent
-echo "☁️ Installation de Google Cloud Ops Agent..."
+echo " Installation de Google Cloud Ops Agent..."
 curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
 bash add-google-cloud-ops-agent-repo.sh --also-install
 
-echo "✅ Frontend setup completed at $(date)"
-echo "🌐 Application should be available on port 80"
-echo "📊 Node Exporter available on port 9100"
+echo " Frontend setup completed at $(date)"
+echo " Application should be available on port 80"
+echo " Node Exporter available on port 9100"

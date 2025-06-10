@@ -51,6 +51,15 @@ cd terraform
 if [ -n "$GITHUB_ACTIONS" ]; then
     echo " Configuration GitHub Actions..."
     export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-key.json"
+    
+    # Authentifier gcloud avec le service account
+    gcloud auth activate-service-account --key-file=service-account-key.json
+    gcloud config set project $PROJECT_ID
+    
+    # Vérifier l'authentification
+    echo " Vérification de l'authentification..."
+    gcloud auth list
+    gcloud config list project
 else
     echo " Configuration locale..."
     if [ ! -f "service-account-key.json" ]; then
@@ -62,10 +71,25 @@ else
     gcloud config set project $PROJECT_ID
 fi
 
-# Créer le bucket Terraform state
+# Créer le bucket Terraform state avec gestion d'erreur
 BUCKET_NAME="${PROJECT_ID}-terraform-state"
-gsutil mb -p $PROJECT_ID -c STANDARD -l $REGION gs://$BUCKET_NAME/ 2>/dev/null || echo "✅ Bucket state existe déjà"
-gsutil versioning set on gs://$BUCKET_NAME/
+echo " Configuration du bucket Terraform state..."
+
+# Vérifier si le bucket existe
+if gsutil ls -b gs://$BUCKET_NAME/ >/dev/null 2>&1; then
+    echo " Bucket state existe déjà"
+else
+    echo " Création du bucket state..."
+    gsutil mb -p $PROJECT_ID -c STANDARD -l $REGION gs://$BUCKET_NAME/
+fi
+
+# Activer le versioning seulement si nécessaire
+if gsutil versioning get gs://$BUCKET_NAME/ | grep -q "Enabled"; then
+    echo " Versioning déjà activé"
+else
+    echo " Activation du versioning..."
+    gsutil versioning set on gs://$BUCKET_NAME/
+fi
 
 # Configuration du backend
 cat > backend.tf << EOF
