@@ -12,17 +12,15 @@ terraform {
 }
 
 provider "google" {
-  credentials = file("service-account-key.json")
-  project     = var.project_id
-  region      = var.region
-  zone        = var.zone
+  project = var.project_id
+  region  = var.region
+  zone    = var.zone
 }
 
 provider "google-beta" {
-  credentials = file("service-account-key.json")
-  project     = var.project_id
-  region      = var.region
-  zone        = var.zone
+  project = var.project_id
+  region  = var.region
+  zone    = var.zone
 }
 
 # Enable required APIs
