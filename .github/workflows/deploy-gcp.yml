@@ -62,7 +62,7 @@ jobs:
         if: steps.check_frontend.outputs.exists == 'true'
         run: |
           cd frontend
-          npm run test:coverage
+          npx vitest run --coverage
 
   terraform-plan:
     name: Terraform Plan
