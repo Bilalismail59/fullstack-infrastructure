@@ -96,11 +96,13 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf << 'EOF'
+          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
+          ENV="${{ matrix.environment }}"
+          cat > backend.tf << EOF
           terraform {
             backend "gcs" {
-              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              bucket = "$BUCKET"
+              prefix = "$ENV/terraform/state"
             }
           }
           EOF
@@ -169,11 +171,13 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf << 'EOF'
+          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
+          ENV="${{ matrix.environment }}"
+          cat > backend.tf << EOF
           terraform {
             backend "gcs" {
-              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              bucket = "$BUCKET"
+              prefix = "$ENV/terraform/state"
             }
           }
           EOF
