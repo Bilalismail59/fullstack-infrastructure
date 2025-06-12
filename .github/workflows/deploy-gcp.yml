@@ -93,29 +93,44 @@ jobs:
         with: 
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Configure Terraform Backend
-        run: |
-          cd terraform
-          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
-          ENV="${{ matrix.environment }}"
-          cat > backend.tf << EOF
-          terraform {
-            backend "gcs" {
-              bucket = "$BUCKET"
-              prefix = "$ENV/terraform/state"
-            }
-          }
-          EOF
-
       - name: Create service account key file
         run: |
           cd terraform
           echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
 
-      - name: Terraform Init
+      - name: Verify GCS bucket exists
+        run: |
+          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
+          if ! gsutil ls -b gs://$BUCKET >/dev/null 2>&1; then
+            echo "Creating Terraform state bucket: $BUCKET"
+            gsutil mb -p ${{ env.GCP_PROJECT_ID }} -l ${{ env.GCP_REGION }} gs://$BUCKET
+            gsutil versioning set on gs://$BUCKET
+          else
+            echo "Terraform state bucket exists: $BUCKET"
+          fi
+
+      - name: Configure Terraform Backend
         run: |
           cd terraform
-          terraform init
+          # Hardcode the bucket name and prefix directly
+          cat > backend.tf << EOF
+          terraform {
+            backend "gcs" {
+              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              prefix = "${{ matrix.environment }}/terraform/state"
+            }
+          }
+          EOF
+          
+          # Debug: Show what was written to the file
+          echo "Content of backend.tf:"
+          cat backend.tf
+
+      - name: Terraform Init with reconfigure
+        run: |
+          cd terraform
+          # Force reconfiguration of the backend
+          terraform init -reconfigure
 
       - name: Terraform Plan
         run: |
@@ -168,29 +183,33 @@ jobs:
           name: tfplan-${{ matrix.environment }}
           path: terraform/
 
-      - name: Configure Terraform Backend
-        run: |
-          cd terraform
-          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
-          ENV="${{ matrix.environment }}"
-          cat > backend.tf << EOF
-          terraform {
-            backend "gcs" {
-              bucket = "$BUCKET"
-              prefix = "$ENV/terraform/state"
-            }
-          }
-          EOF
-
       - name: Create service account key file
         run: |
           cd terraform
           echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
 
-      - name: Terraform Init
+      - name: Configure Terraform Backend
         run: |
           cd terraform
-          terraform init
+          # Hardcode the bucket name and prefix directly
+          cat > backend.tf << EOF
+          terraform {
+            backend "gcs" {
+              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              prefix = "${{ matrix.environment }}/terraform/state"
+            }
+          }
+          EOF
+          
+          # Debug: Show what was written to the file
+          echo "Content of backend.tf:"
+          cat backend.tf
+
+      - name: Terraform Init with reconfigure
+        run: |
+          cd terraform
+          # Force reconfiguration of the backend
+          terraform init -reconfigure
 
       - name: Handle existing resources
         run: |
