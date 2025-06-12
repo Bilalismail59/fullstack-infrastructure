@@ -96,7 +96,7 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf <<EOF
+          cat > backend.tf << 'EOF'
           terraform {
             backend "gcs" {
               bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
@@ -169,23 +169,14 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf <<EOF
+          cat > backend.tf << 'EOF'
           terraform {
             backend "gcs" {
-              bucket = "${secrets.TERRAFORM_STATE_BUCKET}"
-              prefix = "${ENVIRONMENT}/terraform/state"
+              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              prefix = "${{ matrix.environment }}/terraform/state"
             }
           }
           EOF
-
-          env:
-            TERRAFORM_STATE_BUCKET: ${{ secrets.TERRAFORM_STATE_BUCKET }}
-            ENVIRONMENT: ${{ matrix.environment }}
-      
-      - name: Debug backend.tf
-        run: |
-          echo "Contenu du backend.tf :"
-          cat terraform/backend.tf
 
       - name: Create service account key file
         run: |
@@ -195,7 +186,7 @@ jobs:
       - name: Terraform Init
         run: |
           cd terraform
-          terraform init -reconfigure
+          terraform init
 
       - name: Handle existing resources
         run: |
