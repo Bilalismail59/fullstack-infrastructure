@@ -29,16 +29,29 @@ jobs:
         with:
           node-version: '18'
 
+      - name: Check if frontend exists
+        id: check_frontend
+        run: |
+          if [ -d "frontend" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Frontend directory does not exist, skipping npm steps"
+          fi
+
       - name: Install dependencies
+        if: steps.check_frontend.outputs.exists == 'true'
         run: |
           cd frontend
           npm ci
 
       - name: Run tests with coverage
+        if: steps.check_frontend.outputs.exists == 'true'
         run: |
           cd frontend
           npm run test:coverage
 
+      # Commenté temporairement jusqu'à configuration de SonarQube
       # - name: SonarQube Scan
       #   uses: SonarSource/sonarqube-scan-action@master
       #   env:
@@ -287,6 +300,7 @@ jobs:
     if: always()
     steps:
       - name: Notify Slack
+        if: secrets.SLACK_WEBHOOK != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
@@ -297,3 +311,9 @@ jobs:
             Environment: ${{ matrix.environment }}
             Status: ${{ job.status }}
             Commit: ${{ github.sha }}
+      
+      - name: Log deployment status
+        if: secrets.SLACK_WEBHOOK == ''
+        run: |
+          echo "Deployment completed with status: ${{ job.status }}"
+          echo "Slack notification skipped (webhook not configured)"
