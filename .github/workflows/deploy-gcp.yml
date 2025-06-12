@@ -67,10 +67,13 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Setup Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Setup Google Cloud CLI 
+        uses: google-github-actions/setup-gcloud@v1
+        with: 
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Terraform Backend
@@ -94,7 +97,6 @@ jobs:
         run: |
           cd terraform
           terraform init
-
       - name: Terraform Plan
         run: |
           cd terraform
@@ -106,7 +108,7 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="domain_name=${{ secrets.DOMAIN_NAME }}" \
             -out=tfplan-${{ matrix.environment }}
-
+      
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
@@ -130,10 +132,14 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Setup Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:  
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Download Terraform Plan
@@ -219,10 +225,14 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Setup Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:    
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Docker for GCR
@@ -258,10 +268,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:    
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Create Monitoring Dashboards
