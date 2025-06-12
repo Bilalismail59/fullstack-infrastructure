@@ -21,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -39,6 +40,15 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "Frontend directory does not exist, skipping npm steps"
           fi
+
+      - name: Cache node_modules
+        if: steps.check_frontend.outputs.exists == 'true'
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-cache-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-cache-
 
       - name: Install dependencies
         if: steps.check_frontend.outputs.exists == 'true'
