@@ -177,6 +177,11 @@ jobs:
             }
           }
           EOF
+      
+      - name: Debug backend.tf
+        run: |
+          echo "Contenu du backend.tf :"
+          cat terraform/backend.tf
 
       - name: Create service account key file
         run: |
@@ -186,7 +191,7 @@ jobs:
       - name: Terraform Init
         run: |
           cd terraform
-          terraform init
+          terraform init -reconfigure
 
       - name: Handle existing resources
         run: |
