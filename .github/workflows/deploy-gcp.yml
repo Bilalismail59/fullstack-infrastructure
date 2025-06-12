@@ -121,10 +121,12 @@ jobs:
             }
           }
           EOF
-          
-          # Debug: Show what was written to the file
-          echo "Content of backend.tf:"
-          cat backend.tf
+          echo " backend.tf created successfully."
+
+      - name:  Debug all Terraform files
+        run: |
+          echo " Listing and displaying all Terraform files:"
+          find terraform -name '*.tf' -exec echo "--- {} ---" \; -exec cat {} \;
 
       - name: Terraform Init with reconfigure
         run: |
