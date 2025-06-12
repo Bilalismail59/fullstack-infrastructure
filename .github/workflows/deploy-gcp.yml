@@ -54,8 +54,12 @@ jobs:
         if: steps.check_frontend.outputs.exists == 'true'
         run: |
           cd frontend
-          for i in 1 2 3; do
-            npm ci && break || sleep 10
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i"
+            npm cache clean --force
+            npm ci && break
+            echo "Retrying in 15 seconds..."
+            sleep 15
           done   
 
       - name: Run tests with coverage
@@ -92,7 +96,7 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf << 'EOF'
+          cat > backend.tf <<EOF
           terraform {
             backend "gcs" {
               bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
@@ -165,7 +169,7 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          cat > backend.tf << 'EOF'
+          cat > backend.tf <<EOF
           terraform {
             backend "gcs" {
               bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
