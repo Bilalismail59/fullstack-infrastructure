@@ -172,11 +172,15 @@ jobs:
           cat > backend.tf <<EOF
           terraform {
             backend "gcs" {
-              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              bucket = "${secrets.TERRAFORM_STATE_BUCKET}"
+              prefix = "${ENVIRONMENT}/terraform/state"
             }
           }
           EOF
+
+          env:
+            TERRAFORM_STATE_BUCKET: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+            ENVIRONMENT: ${{ matrix.environment }}
       
       - name: Debug backend.tf
         run: |
