@@ -51,14 +51,6 @@ jobs:
           cd frontend
           npm run test:coverage
 
-      # Commenté temporairement jusqu'à configuration de SonarQube
-      # - name: SonarQube Scan
-      #   uses: SonarSource/sonarqube-scan-action@master
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      #     SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
@@ -174,13 +166,10 @@ jobs:
       - name: Handle existing resources
         run: |
           cd terraform
-          
-          # Fonction pour importer une ressource si elle existe
           import_if_exists() {
             local resource_type=$1
             local resource_name=$2
             local gcp_resource_id=$3
-            
             if ! terraform state show "$resource_type.$resource_name" >/dev/null 2>&1; then
               echo "Tentative d'import de $resource_type.$resource_name..."
               terraform import "$resource_type.$resource_name" "$gcp_resource_id" || {
@@ -202,8 +191,6 @@ jobs:
               }
             fi
           }
-          
-          # Importer ou supprimer les ressources conflictuelles
           import_if_exists "google_compute_network" "main" "projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
           import_if_exists "google_compute_health_check" "frontend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
           import_if_exists "google_compute_health_check" "backend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
@@ -250,21 +237,14 @@ jobs:
         if: matrix.environment == 'prod'
         run: |
           gcloud container clusters get-credentials fullstack-app-gke-cluster --region=${{ env.GCP_REGION }}
-          
-          # Update image in deployment
           kubectl set image deployment/frontend-deployment frontend=gcr.io/${{ env.GCP_PROJECT_ID }}/frontend:${{ github.sha }}
-          
-          # Wait for rollout
           kubectl rollout status deployment/frontend-deployment
           kubectl rollout status deployment/backend-deployment
 
       - name: Update Compute Engine instances
         if: matrix.environment == 'preprod'
         run: |
-          # Get instance group
           INSTANCE_GROUP=$(gcloud compute instance-groups managed list --filter="name~fullstack-app-frontend" --format="value(name)" --limit=1)
-          
-          # Rolling update
           gcloud compute instance-groups managed rolling-action start-update $INSTANCE_GROUP \
             --version=template=fullstack-app-frontend-$(date +%s) \
             --zone=${{ env.GCP_ZONE }}
@@ -285,12 +265,10 @@ jobs:
 
       - name: Create Monitoring Dashboards
         run: |
-          # Create custom dashboard for application monitoring
           gcloud monitoring dashboards create --config-from-file=monitoring/gcp-dashboard.json
 
       - name: Setup Alerting Policies
         run: |
-          # Create alerting policies for critical metrics
           gcloud alpha monitoring policies create --policy-from-file=monitoring/alert-policies.yaml
 
   notify-deployment:
@@ -300,20 +278,19 @@ jobs:
     if: always()
     steps:
       - name: Notify Slack
-        if: secrets.SLACK_WEBHOOK != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
           channel: '#deployments'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
           text: |
             Deployment to GCP completed!
             Environment: ${{ matrix.environment }}
             Status: ${{ job.status }}
             Commit: ${{ github.sha }}
-      
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
       - name: Log deployment status
-        if: secrets.SLACK_WEBHOOK == ''
         run: |
           echo "Deployment completed with status: ${{ job.status }}"
-          echo "Slack notification skipped (webhook not configured)"
+          echo "Slack notification sent if webhook was configured."
