@@ -82,6 +82,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
@@ -109,28 +110,46 @@ jobs:
             echo "Terraform state bucket exists: $BUCKET"
           fi
 
+      - name: Clean previous Terraform files
+        run: |
+          cd terraform
+          rm -f backend.tf
+          rm -rf .terraform .terraform.lock.hcl  
+
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          # Hardcode the bucket name and prefix directly
           cat > backend.tf << EOF
           terraform {
             backend "gcs" {
               bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              prefix = "terraform-state/${{ matrix.environment }}"
+              credentials = "service-account-key.json"
             }
           }
           EOF
-          
-          # Debug: Show what was written to the file
-          echo "Content of backend.tf:"
+          echo "Backend configuration:"
           cat backend.tf
 
-      - name: Terraform Init with reconfigure
+      - name:  Debug all Terraform files
+        run: |
+          echo " Listing and displaying all Terraform files:"
+          find terraform -name '*.tf' -exec echo "--- {} ---" \; -exec cat {} \;
+
+      - name: Terraform Init with clean state
         run: |
           cd terraform
-          # Force reconfiguration of the backend
-          terraform init -reconfigure
+          terraform init \
+            -reconfigure \
+            -upgrade \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform-state/${{ matrix.environment }}" \
+            -backend-config="credentials=service-account-key.json"
+
+      - name: Validate Terraform configuration
+        run: |
+          cd terraform
+          terraform validate
 
       - name: Terraform Plan
         run: |
@@ -142,13 +161,14 @@ jobs:
             -var="zone=${{ env.GCP_ZONE }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="domain_name=${{ secrets.DOMAIN_NAME }}" \
-            -out=tfplan-${{ matrix.environment }}
+            -input=false \
+            -out=tfplan-${{ matrix.environment }}.tfplan
 
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
-          path: terraform/tfplan-${{ matrix.environment }}
+          path: terraform/tfplan-${{ matrix.environment }}.tfplan
 
   terraform-apply:
     name: Terraform Apply
@@ -166,11 +186,13 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+          token_format: 'access_token'
 
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v1
@@ -183,119 +205,112 @@ jobs:
           name: tfplan-${{ matrix.environment }}
           path: terraform/
 
-      - name: Create service account key file
+      - name: Clean Terraform environment
         run: |
           cd terraform
-          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          rm -rf .terraform* || true
+          rm -f backend.tf
+          # Suppression des fichiers d'état locaux
+          rm -f terraform.tfstate* || true
 
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          # Hardcode the bucket name and prefix directly
-          cat > backend.tf << EOF
+          cat > backend.tf <<EOF
           terraform {
             backend "gcs" {
-              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              bucket      = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              prefix      = "terraform-state/${{ matrix.environment }}"
+              credentials = "service-account-key.json"
             }
           }
           EOF
-          
-          # Debug: Show what was written to the file
-          echo "Content of backend.tf:"
+          echo "Backend configuration:"
           cat backend.tf
 
-      - name: Terraform Init with reconfigure
+      - name: Create service account key file
         run: |
           cd terraform
-          # Force reconfiguration of the backend
-          terraform init -reconfigure
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          chmod 600 service-account-key.json
 
       - name: Import all existing resources
         run: |
           cd terraform
           set +e
+
+          # 1. Nettoyer les ressources problématiques
+          gcloud compute firewall-rules delete fullstack-app-allow-http --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-ssh --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-internal --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-monitoring --quiet || true
+          gcloud compute networks subnets delete fullstack-app-web-subnet --region=${{ env.GCP_REGION }} --quiet || true
+          gcloud compute networks subnets delete fullstack-app-db-subnet --region=${{ env.GCP_REGION }} --quiet || true
+          gcloud compute addresses delete fullstack-app-private-ip --global --quiet || true
+          gcloud compute ssl-certificates delete fullstack-app-ssl-cert --global --quiet || true
+
+          # 2. Importer les ressources
+          declare -A resources=(
+          ["google_compute_subnetwork.web"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-web-subnet"
+          ["google_compute_subnetwork.db"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-db-subnet"
+          ["google_compute_firewall.allow_http"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-http"
+          ["google_compute_firewall.allow_ssh"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-ssh"
+          ["google_compute_firewall.allow_internal"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-internal"
+          ["google_compute_firewall.allow_monitoring"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-monitoring"
+          ["google_compute_managed_ssl_certificate.default[0]"]="projects/${{ env.GCP_PROJECT_ID }}/global/sslCertificates/fullstack-app-ssl-cert"
+          ["google_compute_global_address.private_ip_address"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-private-ip"
+          ["google_compute_network.main"]="projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
+          ["google_compute_health_check.frontend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
+          ["google_compute_health_check.backend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
+          ["google_compute_global_address.default"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
+          ["google_service_account.compute"]="projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          )  
           
-          echo "=== Phase 1: Nettoyage sélectif des ressources problématiques ==="
-          
-          # Fonction pour supprimer une ressource si elle existe
-          delete_if_exists() {
-            local resource_type=$1
-            local resource_name=$2
-            local delete_command=$3
+          for resource in "${!resources[@]}"; do
+            echo "Importing $resource..."
+            # Supprimer d'abord de l'état si existant
+            terraform state rm "$resource" 2>/dev/null || true
+            # 3 tentatives d'import
+            for i in {1..3}; do
+              terraform import "$resource" "${resources[$resource]}" && break || sleep 10
+            done || echo "Échec import pour $resource"  
+          done
             
-            echo "Vérification de $resource_name..."
-            if eval "$delete_command --dry-run" 2>/dev/null; then
-              echo "Suppression de $resource_name..."
-              eval "$delete_command --quiet" || echo "Échec suppression $resource_name"
-            else
-              echo "$resource_name n'existe pas ou déjà supprimé"
-            fi
+          set -e   
+
+      - name: Terraform Init with state validation
+        run: |
+          cd terraform
+          terraform init \
+            -reconfigure \
+            -upgrade \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform-state/${{ matrix.environment }}" \
+            -backend-config="credentials=service-account-key.json"
+
+          # Validate state integrity
+          terraform state list >/dev/null || {
+            echo "State validation failed, attempting recovery..."
+            terraform init -reconfigure -force-copy
           }
-          
-          # Supprimer uniquement les ressources qui causent des conflits
-          delete_if_exists "firewall" "fullstack-app-allow-http" "gcloud compute firewall-rules delete fullstack-app-allow-http"
-          delete_if_exists "firewall" "fullstack-app-allow-ssh" "gcloud compute firewall-rules delete fullstack-app-allow-ssh"  
-          delete_if_exists "firewall" "fullstack-app-allow-internal" "gcloud compute firewall-rules delete fullstack-app-allow-internal"
-          delete_if_exists "firewall" "fullstack-app-allow-monitoring" "gcloud compute firewall-rules delete fullstack-app-allow-monitoring"
-          delete_if_exists "subnet" "fullstack-app-web-subnet" "gcloud compute networks subnets delete fullstack-app-web-subnet --region=${{ env.GCP_REGION }}"
-          delete_if_exists "subnet" "fullstack-app-db-subnet" "gcloud compute networks subnets delete fullstack-app-db-subnet --region=${{ env.GCP_REGION }}"
-          delete_if_exists "address" "fullstack-app-private-ip" "gcloud compute addresses delete fullstack-app-private-ip --global"
-          
-          echo "=== Phase 2: Import des ressources existantes ==="
-          
-          # Fonction d'import avec retry
-          import_resource() {
-            local tf_resource=$1
-            local gcp_resource=$2
-            local max_attempts=3
-            
-            echo "Import de $tf_resource..."
-            
-            # Supprimer de l'état si existant
-            terraform state rm "$tf_resource" 2>/dev/null || true
-            
-            # Tentatives d'import
-            for attempt in $(seq 1 $max_attempts); do
-              echo "Tentative $attempt/$max_attempts pour $tf_resource"
-              if terraform import "$tf_resource" "$gcp_resource" 2>/dev/null; then
-                echo " Import réussi pour $tf_resource"
-                return 0
-              else
-                echo " Échec tentative $attempt pour $tf_resource"
-                sleep 5
-              fi
-            done
-            
-            echo " Import définitivement échoué pour $tf_resource"
-            return 1
-          }
-          
-          # Import des ressources critiques (celles qui ne causent pas de conflits)
-          import_resource "google_compute_network.main" "projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
-          import_resource "google_compute_health_check.frontend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
-          import_resource "google_compute_health_check.backend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
-          import_resource "google_compute_global_address.default" "projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
-          import_resource "google_service_account.compute" "projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
-          
-          echo "=== Phase 3: Nettoyage de l'état Terraform ==="
-          
-          # Nettoyer l'état des ressources qui vont être recréées
-          terraform state rm "google_compute_subnetwork.web" 2>/dev/null || true
-          terraform state rm "google_compute_subnetwork.db" 2>/dev/null || true
-          terraform state rm "google_compute_firewall.allow_http" 2>/dev/null || true
-          terraform state rm "google_compute_firewall.allow_ssh" 2>/dev/null || true
-          terraform state rm "google_compute_firewall.allow_internal" 2>/dev/null || true
-          terraform state rm "google_compute_firewall.allow_monitoring" 2>/dev/null || true
-          terraform state rm "google_compute_global_address.private_ip_address" 2>/dev/null || true
-          
-          set -e
-          echo "=== Import terminé ==="
 
       - name: Terraform Apply
         run: |
           cd terraform
-          terraform apply -auto-approve tfplan-${{ matrix.environment }}
+          terraform apply \
+            -auto-approve \
+            -input=false \
+            -lock=true \
+            -lock-timeout=15m \
+            -refresh=false \
+            tfplan-${{ matrix.environment }}.tfplan
+
+      - name: Verify applied resources
+        run: |
+          cd terraform
+          terraform output -json > outputs.json
+          echo "Current state resources:"
+          terraform state list
 
   build-and-deploy:
     name: Build and Deploy Application
