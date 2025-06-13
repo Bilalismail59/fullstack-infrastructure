@@ -168,7 +168,7 @@ resource "google_compute_instance_template" "frontend" {
   machine_type = var.machine_type
 
   disk {
-    source_image = var.image_family
+    source_image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts"
     auto_delete  = true
     boot         = true
     disk_size_gb = 20
@@ -206,7 +206,7 @@ resource "google_compute_instance_template" "backend" {
   machine_type = var.machine_type
 
   disk {
-    source_image = var.image_family
+    source_image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
     auto_delete  = true
     boot         = true
     disk_size_gb = 20
@@ -409,7 +409,7 @@ resource "google_compute_global_forwarding_rule" "https" {
 
 # Cloud SQL Instance
 resource "google_sql_database_instance" "main" {
-  name             = "${var.project_name}-${var.environment}-db"
+  name             = "fullstack-app-preprod-db"
   database_version = "MYSQL_8_0"
   region           = var.region
 
@@ -441,6 +441,10 @@ resource "google_sql_database_instance" "main" {
       hour         = 4
       update_track = "stable"
     }
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 
   deletion_protection = var.environment == "prod"
@@ -504,7 +508,7 @@ resource "google_compute_instance" "monitoring" {
 
   boot_disk {
     initialize_params {
-      image = var.image_family
+      image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts"
       size  = 30
     }
   }
