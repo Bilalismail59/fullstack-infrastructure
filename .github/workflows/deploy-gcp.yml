@@ -232,13 +232,29 @@ jobs:
           echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
           chmod 600 service-account-key.json
 
-      - name: Import existing resources
+      - name: Import all existing resources
         run: |
           cd terraform
           set +e
-          terraform import google_compute_subnetwork.web projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-web-subnet || true
-          terraform import google_compute_subnetwork.db projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-db-subnet || true
-          terraform import google_compute_firewall.allow_http projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-http || true
+          declare -A resources=(
+          ["google_compute_subnetwork.web"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-web-subnet"
+          ["google_compute_subnetwork.db"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-db-subnet"
+          ["google_compute_firewall.allow_http"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-http"
+          ["google_compute_firewall.allow_ssh"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-ssh"
+          ["google_compute_firewall.allow_internal"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-internal"
+          ["google_compute_firewall.allow_monitoring"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-monitoring"
+          ["google_compute_global_address.private_ip_address"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-private-ip"
+          ["google_compute_network.main"]="projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
+          ["google_compute_health_check.frontend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
+          ["google_compute_health_check.backend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
+          ["google_compute_global_address.default"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
+          ["google_service_account.compute"]="projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          )
+          
+          for resource in "${!resources[@]}"; do
+            echo "Importing $resource..."
+            terraform import "$resource" "${resources[$resource]}" || echo "Import skipped for $resource"
+          done  
           set -e   
 
       - name: Terraform Init with state validation
@@ -256,40 +272,6 @@ jobs:
             echo "State validation failed, attempting recovery..."
             terraform init -reconfigure -force-copy
           }
-
-      - name: Handle existing resources
-        run: |
-          cd terraform
-          declare -A resources=(
-            ["google_compute_network.main"]="projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
-            ["google_compute_health_check.frontend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
-            ["google_compute_health_check.backend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
-            ["google_compute_global_address.default"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
-            ["google_service_account.compute"]="projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
-          )
-
-          for resource in "${!resources[@]}"; do
-            if ! terraform state show "$resource" >/dev/null 2>&1; then
-              echo "Attempting to import $resource..."
-              terraform import "$resource" "${resources[$resource]}" || {
-                echo "Import failed for $resource"
-                case "$resource" in
-                  "google_compute_network"*)
-                    gcloud compute networks delete "${resource#*.}" --quiet || true
-                    ;;
-                  "google_compute_health_check"*)
-                    gcloud compute health-checks delete "${resource#*.}" --global --quiet || true
-                    ;;
-                  "google_compute_global_address"*)
-                    gcloud compute addresses delete "${resource#*.}" --global --quiet || true
-                    ;;
-                  "google_service_account"*)
-                    gcloud iam service-accounts delete "${resource#*.}@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" --quiet || true
-                    ;;
-                esac
-              }
-            fi
-          done
 
       - name: Terraform Apply
         run: |
