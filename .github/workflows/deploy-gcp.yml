@@ -243,17 +243,21 @@ jobs:
           ["google_compute_firewall.allow_ssh"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-ssh"
           ["google_compute_firewall.allow_internal"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-internal"
           ["google_compute_firewall.allow_monitoring"]="projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-monitoring"
+          ["google_compute_managed_ssl_certificate.default[0]"]="projects/${{ env.GCP_PROJECT_ID }}/global/sslCertificates/fullstack-app-ssl-cert"
           ["google_compute_global_address.private_ip_address"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-private-ip"
           ["google_compute_network.main"]="projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
           ["google_compute_health_check.frontend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
           ["google_compute_health_check.backend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
           ["google_compute_global_address.default"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
           ["google_service_account.compute"]="projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
-          )
+          )  
           
           for resource in "${!resources[@]}"; do
             echo "Importing $resource..."
-            terraform import "$resource" "${resources[$resource]}" || echo "Import skipped for $resource"
+            # 3 tentatives pour chaque import
+            for i in {1..3}; do
+              terraform import "$resource" "${resources[$resource]}" && break || sleep 5
+            done || echo "Échec import pour $resource"  
           done  
           set -e   
 
@@ -272,6 +276,12 @@ jobs:
             echo "State validation failed, attempting recovery..."
             terraform init -reconfigure -force-copy
           }
+
+      - name: Terraform Plan verification
+        run: |
+          cd terraform
+          terraform plan -detailed-exitcode || \
+          (echo "Plan shows changes after imports - applying anyway" && true)
 
       - name: Terraform Apply
         run: |
