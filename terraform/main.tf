@@ -9,12 +9,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  backend "gcs" {
-    bucket      = "tf-state-bucket"  # À remplacer par votre variable
-    prefix      = "terraform-state"
-    credentials = "service-account-key.json"
-  }
 }
 
 provider "google" {
@@ -201,8 +195,6 @@ resource "google_compute_firewall" "allow_monitoring" {
     ]
   }
 }
-
-# [Le reste de votre configuration existante reste inchangé...]
 
 # Service Account for Compute Instances
 resource "google_service_account" "compute" {
