@@ -186,11 +186,13 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+          token_format: 'access_token'
 
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v1
@@ -203,72 +205,99 @@ jobs:
           name: tfplan-${{ matrix.environment }}
           path: terraform/
 
-      - name: Create service account key file
+      - name: Clean Terraform environment
         run: |
           cd terraform
-          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          rm -rf .terraform* || true
+          rm -f backend.tf
 
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          # Hardcode the bucket name and prefix directly
-          cat > backend.tf << EOF
+          cat > backend.tf <<EOF
           terraform {
             backend "gcs" {
-              bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              bucket      = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              prefix      = "terraform-state/${{ matrix.environment }}"
+              credentials = "service-account-key.json"
             }
           }
           EOF
-          
-          # Debug: Show what was written to the file
-          echo "Content of backend.tf:"
+          echo "Backend configuration:"
           cat backend.tf
 
-      - name: Terraform Init with reconfigure
+      - name: Create service account key file
         run: |
           cd terraform
-          # Force reconfiguration of the backend
-          terraform init -reconfigure
+          echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
+          chmod 600 service-account-key.json
+
+      - name: Terraform Init with state validation
+        run: |
+          cd terraform
+          terraform init \
+            -reconfigure \
+            -upgrade \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform-state/${{ matrix.environment }}" \
+            -backend-config="credentials=service-account-key.json"
+
+          # Validate state integrity
+          terraform state list >/dev/null || {
+            echo "State validation failed, attempting recovery..."
+            terraform init -reconfigure -force-copy
+          }
 
       - name: Handle existing resources
         run: |
           cd terraform
-          import_if_exists() {
-            local resource_type=$1
-            local resource_name=$2
-            local gcp_resource_id=$3
-            if ! terraform state show "$resource_type.$resource_name" >/dev/null 2>&1; then
-              echo "Tentative d'import de $resource_type.$resource_name..."
-              terraform import "$resource_type.$resource_name" "$gcp_resource_id" || {
-                echo "Import échoué, suppression de la ressource existante..."
-                case $resource_type in
-                  "google_compute_network")
-                    gcloud compute networks delete $resource_name --quiet || true
+          declare -A resources=(
+            ["google_compute_network.main"]="projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
+            ["google_compute_health_check.frontend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
+            ["google_compute_health_check.backend"]="projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
+            ["google_compute_global_address.default"]="projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
+            ["google_service_account.compute"]="projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          )
+
+          for resource in "${!resources[@]}"; do
+            if ! terraform state show "$resource" >/dev/null 2>&1; then
+              echo "Attempting to import $resource..."
+              terraform import "$resource" "${resources[$resource]}" || {
+                echo "Import failed for $resource"
+                case "$resource" in
+                  "google_compute_network"*)
+                    gcloud compute networks delete "${resource#*.}" --quiet || true
                     ;;
-                  "google_compute_health_check")
-                    gcloud compute health-checks delete $resource_name --global --quiet || true
+                  "google_compute_health_check"*)
+                    gcloud compute health-checks delete "${resource#*.}" --global --quiet || true
                     ;;
-                  "google_compute_global_address")
-                    gcloud compute addresses delete $resource_name --global --quiet || true
+                  "google_compute_global_address"*)
+                    gcloud compute addresses delete "${resource#*.}" --global --quiet || true
                     ;;
-                  "google_service_account")
-                    gcloud iam service-accounts delete "${resource_name}@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" --quiet || true
+                  "google_service_account"*)
+                    gcloud iam service-accounts delete "${resource#*.}@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" --quiet || true
                     ;;
                 esac
               }
             fi
-          }
-          import_if_exists "google_compute_network" "main" "projects/${{ env.GCP_PROJECT_ID }}/global/networks/fullstack-app-vpc"
-          import_if_exists "google_compute_health_check" "frontend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-frontend-hc"
-          import_if_exists "google_compute_health_check" "backend" "projects/${{ env.GCP_PROJECT_ID }}/global/healthChecks/fullstack-app-backend-hc"
-          import_if_exists "google_compute_global_address" "default" "projects/${{ env.GCP_PROJECT_ID }}/global/addresses/fullstack-app-lb-ip"
-          import_if_exists "google_service_account" "compute" "projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/fullstack-app-compute-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          done
 
       - name: Terraform Apply
         run: |
           cd terraform
-          terraform apply -auto-approve tfplan-${{ matrix.environment }}
+          terraform apply \
+            -auto-approve \
+            -input=false \
+            -lock=true \
+            -lock-timeout=5m \
+            tfplan-${{ matrix.environment }}.tfplan
+
+      - name: Verify applied resources
+        run: |
+          cd terraform
+          terraform output -json > outputs.json
+          echo "Current state resources:"
+          terraform state list
 
   build-and-deploy:
     name: Build and Deploy Application
