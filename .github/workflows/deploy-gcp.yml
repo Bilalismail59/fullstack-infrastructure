@@ -232,6 +232,15 @@ jobs:
           echo '${{ secrets.GCP_SA_KEY }}' > service-account-key.json
           chmod 600 service-account-key.json
 
+      - name: Import existing resources
+        run: |
+          cd terraform
+          set +e
+          terraform import google_compute_subnetwork.web projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-web-subnet || true
+          terraform import google_compute_subnetwork.db projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-db-subnet || true
+          terraform import google_compute_firewall.allow_http projects/${{ env.GCP_PROJECT_ID }}/global/firewalls/fullstack-app-allow-http || true
+          set -e   
+
       - name: Terraform Init with state validation
         run: |
           cd terraform
