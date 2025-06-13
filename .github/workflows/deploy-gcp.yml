@@ -82,6 +82,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
@@ -109,30 +110,46 @@ jobs:
             echo "Terraform state bucket exists: $BUCKET"
           fi
 
+      - name: Clean previous Terraform files
+        run: |
+          cd terraform
+          rm -f backend.tf
+          rm -rf .terraform .terraform.lock.hcl  
+
       - name: Configure Terraform Backend
         run: |
           cd terraform
-          # Hardcode the bucket name and prefix directly
           cat > backend.tf << EOF
           terraform {
             backend "gcs" {
               bucket = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-              prefix = "${{ matrix.environment }}/terraform/state"
+              prefix = "terraform-state/${{ matrix.environment }}"
+              credentials = "service-account-key.json"
             }
           }
           EOF
-          echo " backend.tf created successfully."
+          echo "Backend configuration:"
+          cat backend.tf
 
       - name:  Debug all Terraform files
         run: |
           echo " Listing and displaying all Terraform files:"
           find terraform -name '*.tf' -exec echo "--- {} ---" \; -exec cat {} \;
 
-      - name: Terraform Init with reconfigure
+      - name: Terraform Init with clean state
         run: |
           cd terraform
-          # Force reconfiguration of the backend
-          terraform init -reconfigure
+          terraform init \
+            -reconfigure \
+            -upgrade \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform-state/${{ matrix.environment }}" \
+            -backend-config="credentials=service-account-key.json"
+
+      - name: Validate Terraform configuration
+        run: |
+          cd terraform
+          terraform validate
 
       - name: Terraform Plan
         run: |
@@ -144,13 +161,14 @@ jobs:
             -var="zone=${{ env.GCP_ZONE }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="domain_name=${{ secrets.DOMAIN_NAME }}" \
-            -out=tfplan-${{ matrix.environment }}
+            -input=false \
+            -out=tfplan-${{ matrix.environment }}.tfplan
 
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
-          path: terraform/tfplan-${{ matrix.environment }}
+          path: terraform/tfplan-${{ matrix.environment }}.tfplan
 
   terraform-apply:
     name: Terraform Apply
