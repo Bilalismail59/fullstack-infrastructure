@@ -210,6 +210,8 @@ jobs:
           cd terraform
           rm -rf .terraform* || true
           rm -f backend.tf
+          # Suppression des fichiers d'état locaux
+          rm -f terraform.tfstate* || true
 
       - name: Configure Terraform Backend
         run: |
@@ -236,6 +238,18 @@ jobs:
         run: |
           cd terraform
           set +e
+
+          # 1. Nettoyer les ressources problématiques
+          gcloud compute firewall-rules delete fullstack-app-allow-http --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-ssh --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-internal --quiet || true
+          gcloud compute firewall-rules delete fullstack-app-allow-monitoring --quiet || true
+          gcloud compute networks subnets delete fullstack-app-web-subnet --region=${{ env.GCP_REGION }} --quiet || true
+          gcloud compute networks subnets delete fullstack-app-db-subnet --region=${{ env.GCP_REGION }} --quiet || true
+          gcloud compute addresses delete fullstack-app-private-ip --global --quiet || true
+          gcloud compute ssl-certificates delete fullstack-app-ssl-cert --global --quiet || true
+
+          # 2. Importer les ressources
           declare -A resources=(
           ["google_compute_subnetwork.web"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-web-subnet"
           ["google_compute_subnetwork.db"]="projects/${{ env.GCP_PROJECT_ID }}/regions/${{ env.GCP_REGION }}/subnetworks/fullstack-app-db-subnet"
@@ -254,11 +268,14 @@ jobs:
           
           for resource in "${!resources[@]}"; do
             echo "Importing $resource..."
-            # 3 tentatives pour chaque import
+            # Supprimer d'abord de l'état si existant
+            terraform state rm "$resource" 2>/dev/null || true
+            # 3 tentatives d'import
             for i in {1..3}; do
-              terraform import "$resource" "${resources[$resource]}" && break || sleep 5
+              terraform import "$resource" "${resources[$resource]}" && break || sleep 10
             done || echo "Échec import pour $resource"  
-          done  
+          done
+            
           set -e   
 
       - name: Terraform Init with state validation
@@ -277,12 +294,6 @@ jobs:
             terraform init -reconfigure -force-copy
           }
 
-      - name: Terraform Plan verification
-        run: |
-          cd terraform
-          terraform plan -detailed-exitcode || \
-          (echo "Plan shows changes after imports - applying anyway" && true)
-
       - name: Terraform Apply
         run: |
           cd terraform
@@ -290,7 +301,8 @@ jobs:
             -auto-approve \
             -input=false \
             -lock=true \
-            -lock-timeout=5m \
+            -lock-timeout=15m \
+            -refresh=false \
             tfplan-${{ matrix.environment }}.tfplan
 
       - name: Verify applied resources
