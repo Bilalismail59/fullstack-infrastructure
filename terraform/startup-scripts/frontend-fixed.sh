@@ -36,7 +36,7 @@ ufw allow 9100  # Node exporter
 ufw --force enable
 
 # Création de l'utilisateur application
-echo "👤 Création de l'utilisateur application..."
+echo " Création de l'utilisateur application..."
 useradd -m -s /bin/bash appuser
 usermod -aG sudo appuser
 

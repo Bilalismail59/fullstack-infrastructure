@@ -19,7 +19,7 @@ apt-get update
 apt-get upgrade -y
 
 # Installation des dépendances
-echo "🔧 Installation des dépendances..."
+echo " Installation des dépendances..."
 apt-get install -y apache2 mysql-client php php-mysql php-gd php-xml php-mbstring php-curl php-zip php-intl wget unzip ufw fail2ban
 
 # Configuration du firewall
@@ -128,7 +128,7 @@ EOF
 php /tmp/test_db.php
 
 # Installation de WP-CLI
-echo "🔧 Installation de WP-CLI..."
+echo " Installation de WP-CLI..."
 curl -O https://raw.githubusercontent.com/wp-cli/wp-cli/v2.8.1/wp-cli.phar
 chmod +x wp-cli.phar
 mv wp-cli.phar /usr/local/bin/wp
