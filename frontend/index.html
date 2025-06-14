@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projet-Bilal</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>Bienvenue sur ma page</header>
+    <div class="container">
+        <div class="btn">
+            <a class="btn" href="http://localhost:8081/" target="_blank">
+                <img src="img/logo_html.png" alt="Frontend Logo">
+            </a>
+            <p class="text_btn">Frontend</p>
+        </div>
+        <div class="btn">
+            <a class="btn" href="http://localhost:1515/" target="_blank">
+                <img src="img/logo_wp.png" alt="Backend Logo">
+            </a>
+            <p class="text_btn">Backend</p>
+        </div>
+        <div class="btn">
+            <a class="btn" href="http://localhost:8083/" target="_blank">
+                <img src="img/logo_traefik.png" alt="Traefik Logo">
+             </a>
+             <p class="text_btn">Traefik</p>  
+        </div>
+        <div class="btn">
+            <a class="btn" href="http://localhost:19999/" target="_blank">
+                <img src="img/logo_netdata.png" alt="Netdata Logo">
+            </a>
+            <p class="text_btn">Netdata</p>  
+        </div>
+        <div class="btn">
+            <a class="btn" href="#" target="_blank">
+                <img src="img/logo_mysql.png" alt="Bdd Logo">
+            </a>
+            <p class="text_btn">Mysql</p>
+        </div>
+
+        <div class="description">
+            <h2>Présentation du projet FullStack3Tiers</h2>
+            <p>Ce projet est une application full-stack-3Tries qui inclut des services pour le frontend, le backend, 
+                la base de données, le monitoring, et le reverse proxy avec Traefik. j'ai mis en place un environnement
+                 de préproduction avec Docker et un environnement de production avec Kubernetes, tout en automatisant le
+                  déploiement avec GitHub Actions
+            </p>
+
+            <h2>Problémes rencontrés et Résolution</h2>
+            <h3>Probléme 1 : "Aucun fichier ou répertoire nommé kubectl"</h3>
+            <p>Le fichier kubectl n'existe pas, cela peut étre un probléme dans le téléchargement.</p>
+            <p><strong>Solution :</strong> Télécharger le fichier é nouveau et répétez les étapes.</p>
+            
+            <h3>Probléme 2 : "Erreur d'intégrité lors de la vérification du fichier"</h3>
+            <p>Si la commande de vérification d'intégrité échoue, cela peut signifier que le fichier téléchargé est corrompu ou qu'il ne correspond pas é la somme de contréle attendue.</p>
+            <p><strong>Solution :</strong> Réessayez le téléchargement ou vérifiez que l'URL du fichier SHA256 est correcte.</p>
+            
+            <ul>
+                <li><strong>Curl :</strong> Un utilitaire de ligne de commande utilisé pour transférer des données via des protocoles réseau.</li>
+                <li><strong>Sha256sum :</strong> Un outil utilisé pour générer ou vérifier des sommes de contréle (hash) en utilisant l'algorithme SHA-256. Cela garantit que le fichier téléchargé est exact et n'a pas été altéré.</li>
+                <li><strong>Chmod :</strong> Une commande Linux utilisée pour modifier les permissions des fichiers. Nous l'utilisons pour rendre le fichier kubectl exécutable.</li>
+            </ul>
+
+            <h2>Conclusion</h2>
+            <p>En conclusion, le projet FullStack3Tiers est un excellent moyen de mettre en pratique les concepts de déploiement d'applications full-stack avec Docker et Kubernetes. 
+                Il permet de comprendre comment les différents services interagissent les uns avec les autres et comment les automatiser pour un déploiement plus efficace. 
+                J'ai appris beaucoup de choses en travaillant sur ce projet et je suis impatient de continuer é explorer
+            </p>
+
+            
+        </div>
+    </div>
+   
+    <footer>&copy; 2025 - Ismail Bilal</footer>
+</body>
+</html>
